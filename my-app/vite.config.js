@@ -6,14 +6,14 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
 
-  // build: {
-  //   rollupOptions: {
-  //     input: {
-  //       main: resolve(__dirname, 'index.html'),
-  //       privacy: resolve(__dirname, 'privacy.html'), // 
-  //     },
-  //   },
-  // },
-  // base: '/Seeed-Pintarest-DashBoard/', 
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        privacy: resolve(__dirname, 'privacy.html'), // 
+      },
+    },
+  },
+  base: '/Seeed-Pintarest-DashBoard/', 
   
 })
