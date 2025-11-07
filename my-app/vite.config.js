@@ -10,10 +10,10 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
-        privacy: resolve(__dirname, 'privacy.html'), // 👈 add this line
+        privacy: resolve(__dirname, 'privacy.html'), // 
       },
     },
   },
-  base: '/Seeed-Pintarest-DashBoard/', // 👈 important for GitHub Pages
+  base: '/Seeed-Pintarest-DashBoard/', 
   
 })
