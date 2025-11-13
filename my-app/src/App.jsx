@@ -1,15 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Droplets, Thermometer, Music, Play, Pause, User, X } from 'lucide-react';
+import mqtt from 'mqtt';
 
 export default function Dashboard() {
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [humidity, setHumidity] = useState(null);
-  const [temperature, setTemperature] = useState(null);
-  const [useCelsius, setUseCelsius] = useState(true);
   const [currentlyPlaying, setCurrentlyPlaying] = useState(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [currentSong, setCurrentSong] = useState(null);
   const [audio, setAudio] = useState(null);
+
+  const [client, setClient] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [messages, setMessages] = useState([]);
+
+  const [temperatureC, setTemperatureC] = useState(null);
+  const [humidity, setHumidity] = useState(null);
+  const [showF, setShowF] = useState(false); // toggle °C ↔ °F
+  const [useCelsius, setUseCelsius] = useState(true); 
+
+  // Convert C ↔ F
+  const convertTemp = (c) => (c * 9) / 5 + 32;
+
 
   // Profile system
   const [profiles] = useState([
@@ -102,22 +113,36 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const fetchSensorData = async () => {
-      try {
-        const res = await fetch("http://10.0.0.158/sensor"); 
-        const json = await res.json();
-        setTemperature(json.temperature);
-        setHumidity(json.humidity);
-      } catch (err) {
-        console.error("Error fetching sensor data:", err);
-      }
-    };
+  useEffect(() => {    
+    const mqttClient = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
 
-    fetchSensorData(); // fetch immediately on mount
-    const interval = setInterval(fetchSensorData, 5000); // fetch every 5 seconds
-    return () => clearInterval(interval);
+
+    mqttClient.on("connect", () => {
+      console.log("Connected to MQTT broker");
+      setIsConnected(true);
+
+      mqttClient.subscribe("esp32/temperature");
+      mqttClient.subscribe("esp32/humidity");
+    });
+
+    mqttClient.on("message", (topic, message) => {
+      const msg = message.toString();
+      console.log("Message received:", topic, msg);
+
+      setMessages((prev) => [...prev, `${topic}: ${msg}`]);
+
+      if (topic === "esp32/temperature") setTemperatureC(parseFloat(msg));
+      if (topic === "esp32/humidity") setHumidity(parseFloat(msg));
+        });
+
+    setClient(mqttClient);
+
+    return () => {
+      mqttClient.end();
+    };
   }, []);
+
+  
 
   const formatTime = (date) => {
     return date.toLocaleTimeString('en-US', { 
@@ -132,11 +157,11 @@ export default function Dashboard() {
   };
 
   const getTemperatureDisplay = () => {
-    if (temperature === null) return '--°C';
+    if (temperatureC === null) return '--°C';
     if (useCelsius) {
-      return `${temperature.toFixed(1)}°C`;
+      return `${temperatureC.toFixed(1)}°C`;
     }
-    return `${((temperature * 9/5) + 32).toFixed(1)}°F`;
+    return `${((temperatureC * 9/5) + 32).toFixed(1)}°F`;
   };
 
   const togglePlayPause = (songId) => {
@@ -209,6 +234,47 @@ export default function Dashboard() {
     backgroundColor: currentProfile.bgColor
   } : { backgroundColor: currentProfile.bgColor };
 
+  useEffect(() => {
+    // Use your broker WebSocket address (replace BROKER_IP)
+    const mqttClient = mqtt.connect("wss://test.mosquitto.org:8081"); 
+    // Example public broker for testing
+    // For your ESP32, use: wss://<your_broker_ip>:<websocket_port>
+
+    mqttClient.on("connect", () => {
+      console.log("✅ Connected to MQTT broker");
+      setIsConnected(true);
+      mqttClient.subscribe("esp32/status", (err) => {
+        if (!err) console.log("📡 Subscribed to esp32/status");
+      });
+    });
+
+    mqttClient.on("message", (topic, message) => {
+      const msg = message.toString();
+      console.log("📩 Message received:", topic, msg);
+      setMessages((prev) => [...prev, `${topic}: ${msg}`]);
+    });
+
+    mqttClient.on("error", (err) => {
+      console.error("❌ MQTT error:", err);
+    });
+
+    setClient(mqttClient);
+
+    // Cleanup when component unmounts
+    return () => {
+      mqttClient.end();
+    };
+  }, []);
+
+  const sendCommand = (cmd) => {
+    if (client && isConnected) {
+      client.publish("esp32/command", cmd);
+      console.log("📤 Sent:", cmd);
+    } else {
+      console.log("⚠️ Not connected to MQTT broker");
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center p-0" style={kidsBackground}>
       <div className="w-full max-w-[390px] p-4">
@@ -276,8 +342,8 @@ export default function Dashboard() {
             <div className="relative w-full h-24 flex items-end justify-center">
               <svg viewBox="0 0 100 60" className="w-full h-full">
                 {(() => {
-                  if (temperature === null) return null;
-                  const tempC = useCelsius ? temperature : (temperature * 9/5) + 32;
+                  if (temperatureC === null) return null;
+                  const tempC = useCelsius ? temperatureC : (temperatureC * 9/5) + 32;
                   const minTemp = useCelsius ? -10 : 14;
                   const maxTemp = useCelsius ? 45 : 113;
                   const percentage = Math.max(0, Math.min(1, (tempC - minTemp) / (maxTemp - minTemp)));
@@ -320,12 +386,13 @@ export default function Dashboard() {
             <div className="flex items-center justify-center gap-2 mt-2">
               <Thermometer className="w-5 h-5 text-red-500" />
               <button
-                onClick={() => setUseCelsius(!useCelsius)}
+                // onClick={() => setUseCelsius(!useCelsius)}
+                onClick={() => setShowF((prev) => !prev)}
                 className="text-2xl font-bold cursor-pointer hover:scale-105 transition-transform"
                 style={{ 
                   color: (() => {
-                    if (temperature === null) return '#6b7280';
-                    const tempC = useCelsius ? temperature : (temperature * 9/5) + 32;
+                    if (temperatureC === null) return '#6b7280';
+                    const tempC = useCelsius ? temperatureC : (temperatureC * 9/5) + 32;
                     const minTemp = useCelsius ? -10 : 14;
                     const maxTemp = useCelsius ? 45 : 113;
                     const percentage = Math.max(0, Math.min(1, (tempC - minTemp) / (maxTemp - minTemp)));
@@ -517,18 +584,37 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
-      {/* </div> */}
+      </div>
 
       {/* Yes/No Buttons */}
-        <div className="flex gap-4">
-          <button className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-all hover:scale-105 text-xl">
-            Yes
-          </button>
-          <button className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-all hover:scale-105 text-xl">
-            No
-          </button>
-        </div>
+      <p>Status: {isConnected ? "🟢 Connected" : "🔴 Disconnected"}</p>
+
+      <div style={{ margin: "20px" }}>
+        <button
+          onClick={() => sendCommand("Yes")}
+          style={{
+            background: "green",
+            color: "white",
+            padding: "10px 20px",
+            marginRight: "10px",
+            borderRadius: "8px",
+          }}
+        >
+          Send YES
+        </button>
+        <button
+          onClick={() => sendCommand("No")}
+          style={{
+            background: "red",
+            color: "white",
+            padding: "10px 20px",
+            borderRadius: "8px",
+          }}
+        >
+          Send NO
+        </button>
       </div>
+      {/* </div> */}
 
       {/* Profile Selection Modal */}
       {showProfileModal && (
