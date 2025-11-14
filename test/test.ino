@@ -23,20 +23,25 @@ U8X8_SSD1306_128X64_NONAME_HW_I2C u8x8(/* clock=*/SCL, /* data=*/SDA, /* reset=*
 const char* ssid = "ItHurtsWhenIP";
 const char* password = "4111WhitmanAveN303";
 
-// WiFiServer server(80); // for Http
-const char* mqttServer = "BROKER_IP";  // your MQTT broker
-const int mqttPort = 1883;
+// MQTT broker (you can test first with test.mosquitto.org)
+const char* mqtt_server = "broker.hivemq.com";
+const int mqtt_port = 1883;  // regular TCP port (not WebSocket)
+
+// WiFiServer server(80); 
+WebServer server(80); // for Http
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+
+String clientId = "ESP32Client-" + String(random(0xffff), HEX);
+// Topics
+const char* commandTopic = "esp32/command";
+const char* statusTopic = "esp32/status";
 
 // 🕒 NTP Server and Seattle time offset
 const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -8 * 3600;  // Pacific Standard Time (UTC-8)
 const int daylightOffset_sec = 3600;
-
-float latestTemp = 0;
-float latestHumi = 0;
 
 // Set up for reading file
 String getContentType(String filename) {
@@ -57,61 +62,130 @@ String getContentType(String filename) {
 }
 
 void handleFile(String path) {
-  Serial.println("In handleFile");
+  Serial.println("---- HTTP Request ----");
+  Serial.print("Requested Path: ");
+  Serial.println(path);
 
-  // Serve index.html if root is requested
-  if (path.endsWith("/"))
-    path += "index.html";
+  if (path.endsWith("/")) path += "index.html";
 
-  String contentType = getContentType(path);  // Determine MIME type
+  String contentType = getContentType(path);
+  Serial.print("Content-Type Resolved: ");
+  Serial.println(contentType);
+
+  Serial.print("Checking FS for: ");
+  Serial.println(path);
 
   if (LittleFS.exists(path)) {
+    Serial.println("✅ File Exists → serving file");
     File file = LittleFS.open(path, "r");
     server.streamFile(file, contentType);
     file.close();
   } else {
+    Serial.println("❌ File Not Found → sending 404");
     server.send(404, "text/plain", "File Not Found");
   }
+  Serial.println("----------------------");
 }
+
+
+// void handleFile(String path) {
+//   Serial.println("In handleFile");
+
+//   // Serve index.html if root is requested
+//   if (path.endsWith("/")) path += "index.html";
+
+//   String contentType = getContentType(path);  // Determine MIME type
+
+//   if (LittleFS.exists(path)) {
+//     File file = LittleFS.open(path, "r");
+//     server.streamFile(file, contentType);
+//     file.close();
+//   } else {
+//     server.send(404, "text/plain", "File Not Found");
+//   }
+// }
 
 // MQTT set up
-void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
+// ===== When a message arrives =====
+void callback(char* topic, byte* message, unsigned int length) {
+  Serial.print("📩 Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
+
+  String msg;
   for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
+    msg += (char)message[i];
   }
-  Serial.println();
+  Serial.println(msg);
+
+  // Handle Yes / No commands
+  if (msg == "Yes") {
+    Serial.println("✅ Received YES command");
+    client.publish(statusTopic, "ESP32: YES received!");
+  } 
+  else if (msg == "No") {
+    Serial.println("❌ Received NO command");
+    client.publish(statusTopic, "ESP32: NO received!");
+  } 
+  // Handle song requests by ID
+  else if (msg == "Spring") {
+    Serial.println("🎵 Spring (Season) selected");
+    client.publish(statusTopic, "Playing Spring song!");
+  } 
+  else if (msg == "Summer") {
+    Serial.println("🎵 Summer (Season) selected");
+    client.publish(statusTopic, "Playing Summer song!");
+  } 
+  else if (msg == "Autumn") {
+    Serial.println("🎵 Autumn (Season) selected");
+    client.publish(statusTopic, "Playing Fall song!");
+  } 
+  else if (msg == "Winter") {
+    Serial.println("🎵 Winter (Season) selected");
+    client.publish(statusTopic, "Playing Winter song!");
+  } 
+  else if (msg == "Dog") {
+    Serial.println("🐕 Puppy song selected");
+    client.publish(statusTopic, "Playing Puppy song!");
+  } 
+  else if (msg == "Cat") {
+    Serial.println("🐱 Kitty song selected");
+    client.publish(statusTopic, "Playing Kitty song!");
+  } 
+  else if (msg == "Bird") {
+    Serial.println("🐦 Bird song selected");
+    client.publish(statusTopic, "Playing Bird song!");
+  } 
+  else if (msg == "Cow") {
+    Serial.println("🐄 Cow song selected");
+    client.publish(statusTopic, "Playing Cow song!");
+  }
+  else {
+    Serial.println("⚠️ Unknown command received");
+    client.publish(statusTopic, "Unknown command!");
+  }
 }
 
-EthernetClient ethClient;
-PubSubClient client(ethClient);
-
+// ===== Reconnect to MQTT if disconnected =====
 void reconnect() {
-  // Loop until we're reconnected
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    if (client.connect("arduinoClient")) {
-      Serial.println("connected");
-      // Once connected, publish an announcement...
-      client.publish("outTopic", "hello world");
-      // ... and resubscribe
-      client.subscribe("inTopic");
+    if (client.connect(clientId.c_str())) {
+      Serial.println("✅ connected to MQTT broker");
+      client.subscribe(commandTopic);
     } else {
-      Serial.print("failed, rc=");
+      Serial.print("❌ failed, rc=");
       Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
+      Serial.println(" — retrying in 5 seconds");
       delay(5000);
     }
   }
 }
 
 
+
 void initWiFi() {
-  WiFi.mode(WIFI_STA);
+  // WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi ..");
   while (WiFi.status() != WL_CONNECTED) {
@@ -121,8 +195,54 @@ void initWiFi() {
   Serial.println();
   Serial.print("Connected! IP address: ");
   Serial.println(WiFi.localIP());
+  Serial.println(WiFi.status() == WL_CONNECTED ? "WiFi OK" : "WiFi failed");
 
   // server.begin();
+}
+
+// ---------------- DISPLAY FUNCTIONS ---------------- //
+
+void displayTemperature(float temp) {
+  u8x8.clearDisplay();
+  u8x8.setFont(u8x8_font_inb33_3x6_f);
+  u8x8.setCursor(0, 1);
+  u8x8.print(temp, 1);
+  u8x8.print("C");
+
+  u8x8.setFont(u8x8_font_chroma48medium8_r);
+  u8x8.setCursor(0, 7);
+  u8x8.print("Temp");
+}
+
+void displayHumidity(float humi) {
+  u8x8.clearDisplay();
+  u8x8.setFont(u8x8_font_inb33_3x6_f);
+  u8x8.setCursor(0, 1);
+  u8x8.print(humi * 100, 1);
+  u8x8.print("%");
+
+  u8x8.setFont(u8x8_font_chroma48medium8_r);
+  u8x8.setCursor(0, 7);
+  u8x8.print("Humid");
+}
+
+void displayTime() {
+  Time nowTime = pcf.getTime();
+
+  u8x8.clearDisplay();
+  u8x8.setFont(u8x8_font_inb33_3x6_f);
+  u8x8.setCursor(0, 1);
+  u8x8.print(nowTime.hour);
+  u8x8.print(":");
+  u8x8.printf("%02d", nowTime.minute);
+
+  u8x8.setFont(u8x8_font_chroma48medium8_r);
+  u8x8.setCursor(0, 7);
+  u8x8.print(nowTime.month);
+  u8x8.print("/");
+  u8x8.print(nowTime.day);
+  u8x8.print("/");
+  u8x8.print(nowTime.year + 1952);
 }
 
 void setup() {
@@ -141,18 +261,17 @@ void setup() {
 
   initWiFi();
 
+  server.begin(); 
+  Serial.println("Server started!");
+  Serial.print("WiFi mode: ");
+  Serial.println(WiFi.getMode());
+
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+
   server.onNotFound([]() {
-    Serial.println("Root path requested");
     handleFile(server.uri());
   });
-  server.on("/sensor", []() {
-    Serial.println("Sensor API requested");
-    String json = "{";
-    json += "\"temperature\": " + String(latestTemp, 1) + ",";
-    json += "\"humidity\": " + String(latestHumi, 1);
-    json += "}";
-    server.send(200, "application/json", json);
-  });  // server.on("/", []() { // server.send(200, "text/plain", "Hello from ESP32"); // }); server.begin(); Serial.println("Server started!");
 
   u8x8.begin();
   u8x8.setFlipMode(1);
@@ -188,93 +307,38 @@ void setup() {
   }
 
   // // Disconnect Wi-Fi to save power
-  WiFi.disconnect(true);
+  // WiFi.disconnect(true);
 
   AHT.begin();
 }
 
 void loop() {
-  WiFiClient client = server.available();  // listen for incoming clients
-
-  Time nowTime = pcf.getTime();
-
-  u8x8.setFont(u8x8_font_chroma48medium8_r);  // choose a suitable font
-  Serial.printf("RTC time: %04d-%02d-%02d %02d:%02d:%02d\n",
-                nowTime.year + 1952,
-                nowTime.month,
-                nowTime.day,
-                nowTime.hour,
-                nowTime.minute,
-                nowTime.second);
-
-  // delay(1000);
+  server.handleClient();
 
   float humi, temp;
   int ret = AHT.getSensor(&humi, &temp);
 
-  u8x8.setFont(u8x8_font_chroma48medium8_r);  // choose a suitable font
+  if (ret) {
+    //  Sending Tem info to interface
+    client.publish("esp32/temperature", String(temp).c_str());
+    client.publish("esp32/humidity", String(humi*100).c_str());
 
-  if (ret)  // GET DATA OK
-  {
-    u8x8.clearDisplay();
-    u8x8.setFont(u8x8_font_inb33_3x6_f);
-    u8x8.setCursor(0, 1);
-    u8x8.print(temp, 1);
-    u8x8.print("C");
-    u8x8.setFont(u8x8_font_chroma48medium8_r);
-    u8x8.setCursor(0, 7);  // Row 0, column 0
-    u8x8.print("Temp");
-
+    displayTemperature(temp);
     delay(3000);
-    u8x8.clearDisplay();
 
-    u8x8.setCursor(0, 1);
-    u8x8.setFont(u8x8_font_inb33_3x6_f);
-    u8x8.print(humi * 100, 1);  // show 1 decimal
-    u8x8.print("%");
-    u8x8.setFont(u8x8_font_chroma48medium8_r);
-    u8x8.setCursor(0, 7);
-    u8x8.setFont(u8x8_font_chroma48medium8_r);
-    u8x8.print("Humid");
+    displayHumidity(humi);
+    delay(3000);
 
-    delay(1000);
-    u8x8.clearDisplay();
-    u8x8.setCursor(0, 0);
-    u8x8.setFont(u8x8_font_open_iconic_weather_4x4);
-    u8x8.print((char)0);
+    displayTime();
+    delay(2000);
 
-
-    // delay(1000);
-    // u8x8.clearDisplay();
-    // u8x8.setCursor(0, 0);
-    // u8x8.setFont(u8x8_font_open_iconic_weather_4x4);
-    // u8x8.print("64");
-
-  } else  // GET DATA FAIL
-  {
+  } else {
     Serial.println("GET DATA FROM AHT20 FAIL");
   }
 
-  delay(3000);
-  u8x8.clearDisplay();
-  u8x8.setFont(u8x8_font_inb33_3x6_f);
-  u8x8.setCursor(0, 1);
-  u8x8.print(nowTime.hour);
-  u8x8.print(":");
-  u8x8.printf("%02d", nowTime.minute);
-  // u8x8.print(":");
-  // u8x8.println(nowTime.second);
+  if (!client.connected()) {
+    reconnect();
+  }
 
-  u8x8.setFont(u8x8_font_chroma48medium8_r);
-  u8x8.setCursor(0, 7);
-  u8x8.print(nowTime.month);
-  u8x8.print("/");
-  u8x8.print(nowTime.day);
-  u8x8.print("/");
-  u8x8.print(nowTime.year + 1952);
-
-
-
-
-  delay(3000);
+  client.loop();
 }

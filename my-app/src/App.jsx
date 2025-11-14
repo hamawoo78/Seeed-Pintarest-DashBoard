@@ -18,6 +18,8 @@ export default function Dashboard() {
   const [showF, setShowF] = useState(false); // toggle °C ↔ °F
   const [useCelsius, setUseCelsius] = useState(true); 
 
+  const [nowPlaying, setNowPlaying] = useState(true); 
+
   // Convert C ↔ F
   const convertTemp = (c) => (c * 9) / 5 + 32;
 
@@ -31,18 +33,10 @@ export default function Dashboard() {
       image: null,
       bgColor: '#fee2e2',
       seasons: [
-        { id: 1, name: 'Spring', emoji: '🌸', songs: [
-          { id: 1, title: "Spring", url: "/public/music/Spring.mp3"},
-        ]},
-        { id: 2, name: 'Summer', emoji: '☀️', songs: [
-          { id: 2, title: "Summer", url: "/music/Summer.mp3"},
-        ]},
-        { id: 3, name: 'Autumn', emoji: '🍂', songs: [
-          { id: 3, title: "Fall", url: "/music/Fall.mp3" },
-        ]},
-        { id: 4, name: 'Winter', emoji: '❄️', songs: [
-          { id: 4, title: "Winter", url: "/music/Winter.mp3" },
-        ]}
+        { id: 1, name: 'Spring', emoji: '🌸', url: "/public/music/Spring.mp3"},
+        { id: 2, name: 'Summer', emoji: '☀️', url: "/music/Summer.mp3"},
+        { id: 3, name: 'Autumn', emoji: '🍂', url: "/music/Fall.mp3"},
+        { id: 4, name: 'Winter', emoji: '❄️', url: "/music/Winter.mp3"}
       ]
     },
     {
@@ -52,28 +46,17 @@ export default function Dashboard() {
       image: null,
       bgColor: '#FFE4E9',
       seasons: [
-        { id: 1, name: 'Dogs', emoji: '🐕', songs: [
-          { id: 11, title: "Puppy", url: "/music/dog.wav" },
-        ]},
-        { id: 2, name: 'Cats', emoji: '🐱', songs: [
-          { id: 12, title: "Kitty", url: "/music/cat.wav" },
-        ]},
-        { id: 3, name: 'Birds', emoji: '🐦', songs: [
-          { id: 13, title: "Bird", url: "/music/birds.wav" },
-        ]},
-        { id: 4, name: 'Cow', emoji: '🐄', songs: [
-          { id: 14, title: "Cow", url: "/music/cow.wav" },
-
-        ]}
+        { id: 11, name: 'Dog', emoji: '🐕', url: "/music/dog.wav" },
+        { id: 12, name: 'Cat', emoji: '🐱', url: "/music/cat.wav" },
+        { id: 13, name: 'Bird', emoji: '🐦', url: "/music/birds.wav" },
+        { id: 14, name: 'Cow', emoji: '🐄', url: "/music/cow.wav" }
       ]
     }
   ]);
   
   const [currentProfile, setCurrentProfile] = useState(profiles[0]);
   const [profileImages, setProfileImages] = useState({});
-  // const [expandedSeason, setExpandedSeason] = useState(null);
-  // const [currentlyPlaying, setCurrentlyPlaying] = useState(null);
-  // const [currentSong, setCurrentSong] = useState(null);
+
   
   const [pinterestImages] = useState([
     { id: 1, url: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=300&h=400&fit=crop', title: 'Mountain View' },
@@ -173,29 +156,35 @@ export default function Dashboard() {
   };
 
   const playSong = (season) => {
-    const song = season.songs[0]; // pick the first song in this season
-    if (!song) return;
+    if (!season || !season.url) return;
+
+    // Send command to ESP32 (send the song id)
+    sendCommand(season.name);
 
     // If the same song is playing, stop it
-    if (currentlyPlaying === song.id) {
+    if (currentlyPlaying === season.id) {
       if (audio) audio.pause();
       setCurrentlyPlaying(null);
       setCurrentSong(null);
       setAudio(null);
+      setNowPlaying(null);
       return;
     }
 
     // Stop any currently playing audio
     if (audio) audio.pause();
 
-    // Create and play new audio
-    const newAudio = new Audio(song.url);
+    // Create and play new audio locally
+    const newAudio = new Audio(season.url);
     newAudio.play();
 
-    // Update states
+    // Update states locally
     setAudio(newAudio);
-    setCurrentlyPlaying(song.id);
-    setCurrentSong(song);
+    setCurrentlyPlaying(season.id);
+    setCurrentSong(season);
+
+    // Show temporary "Now Playing" message until ESP32 responds
+    setNowPlaying(`Playing ${season.name}...`);
   };
 
 
@@ -236,7 +225,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Use your broker WebSocket address (replace BROKER_IP)
-    const mqttClient = mqtt.connect("wss://test.mosquitto.org:8081"); 
+    const mqttClient = mqtt.connect("wss://broker.hivemq.com:8884/mqtt"); 
     // Example public broker for testing
     // For your ESP32, use: wss://<your_broker_ip>:<websocket_port>
 
@@ -572,7 +561,7 @@ export default function Dashboard() {
                 <button
                   onClick={() => playSong(season)}
                   className={`w-16 h-16 rounded-full flex items-center justify-center text-4xl transition-all ${
-                    currentlyPlaying === season.songs[0].id 
+                    currentlyPlaying === season.id 
                       ? 'bg-purple-300 scale-110 animate-pulse' 
                       : 'bg-gray-100 hover:bg-gray-200'
                   }`}
